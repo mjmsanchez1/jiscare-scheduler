@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import Topbar from '../../components/shared/Topbar'
-import { MOCK_SHIFTS, refreshEmployees } from '../../utils/mockData'
+import { refreshShifts, refreshEmployees } from '../../utils/mockData'
 import {
   getWeekDates, toISODate, getWeekLabel, isToday,
   addWeeks, shiftBadgeClass, DAYS_SHORT, DAYS, formatDate
@@ -13,18 +13,25 @@ import ToastContainer from '../../components/ui/Toast'
 export default function MySchedule() {
   const { user } = useAuth()
   const { toasts, toast } = useToast()
-  const [weekRef, setWeekRef]   = useState(new Date())
+  const [weekRef, setWeekRef]     = useState(new Date())
   const [weekDates, setWeekDates] = useState([])
+  const [shifts, setShifts]       = useState(() => refreshShifts())
 
   useEffect(() => { setWeekDates(getWeekDates(weekRef)) }, [weekRef])
+  // Reload from localStorage every time week changes
+  useEffect(() => { setShifts(refreshShifts()) }, [weekRef])
+  // Also reload on window focus (admin saved in another tab)
+  useEffect(() => {
+    const onFocus = () => setShifts(refreshShifts())
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
 
   const weekLabel = getWeekLabel(weekDates)
 
-  // Always pull the freshest profile from localStorage DB
-  // user.id is the Employee_ID (e.g. 'EMP-002') set by AuthContext at login
   const employees = refreshEmployees()
   const empData   = employees.find(e => e.Employee_ID === user?.id) || {
-    Employee_ID: user?.id || '—',
+    Employee_ID: user?.id       || '—',
     Name:        user?.name     || 'Unknown Employee',
     Department:  user?.dept     || '—',
     Position:    user?.position || '—',
@@ -33,22 +40,14 @@ export default function MySchedule() {
 
   const getShift = (date) => {
     const iso = toISODate(date)
-    return MOCK_SHIFTS.find(s => s.Employee_ID === empData.Employee_ID && s.Date === iso)
+    return shifts.find(s => s.Employee_ID === empData.Employee_ID && s.Date === iso)
   }
 
   const handlePDFExport = () => {
     try {
-      exportSchedulePDF({
-        employeeName: empData.Name,
-        employeeId:   empData.Employee_ID,
-        weekDates,
-        shifts:       MOCK_SHIFTS,
-        weekLabel,
-      })
+      exportSchedulePDF({ employeeName: empData.Name, employeeId: empData.Employee_ID, weekDates, shifts, weekLabel })
       toast.success('PDF Downloaded!', 'Your schedule PDF has been saved.')
-    } catch (e) {
-      toast.error('Export Failed', e.message)
-    }
+    } catch (e) { toast.error('Export Failed', e.message) }
   }
 
   const todayShift = weekDates.map(d => getShift(d)).find((s, i) => isToday(weekDates[i]))
@@ -62,16 +61,12 @@ export default function MySchedule() {
         <div className="page-header" style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexWrap:'wrap', gap:12 }}>
           <div>
             <h1>📅 My Schedule</h1>
-            {/* This line now shows the real name/position/department from the DB */}
             <p>Hello, <strong>{empData.Name}</strong> — {empData.Position} · {empData.Department}</p>
           </div>
-          <button className="btn btn-primary" onClick={handlePDFExport}>
-            📄 Download PDF
-          </button>
+          <button className="btn btn-primary" onClick={handlePDFExport}>📄 Download PDF</button>
         </div>
 
-        {/* Today's shift highlight */}
-        {todayShift && (
+        {todayShift ? (
           <div style={{
             background: 'linear-gradient(135deg, var(--c-teal), var(--c-teal-dark))',
             borderRadius: 'var(--radius-lg)', padding: '24px 28px', color: '#fff',
@@ -95,9 +90,20 @@ export default function MySchedule() {
               <div style={{ fontSize:'1.1rem', fontWeight:700 }}>{formatDate(new Date(), { month:'long', day:'numeric' })}</div>
             </div>
           </div>
+        ) : (
+          <div style={{
+            background:'var(--c-bg)', border:'1.5px dashed var(--c-border)',
+            borderRadius:'var(--radius-lg)', padding:'20px 28px',
+            marginBottom:24, display:'flex', alignItems:'center', gap:16, color:'var(--c-text-3)',
+          }}>
+            <span style={{ fontSize:'1.8rem' }}>📋</span>
+            <div>
+              <div style={{ fontWeight:600, color:'var(--c-text-2)' }}>No shift scheduled for today</div>
+              <div style={{ fontSize:'0.8rem', marginTop:2 }}>Your admin hasn't assigned a shift for today yet.</div>
+            </div>
+          </div>
         )}
 
-        {/* Week Navigation */}
         <div className="week-nav">
           <button className="btn btn-ghost btn-sm" onClick={() => setWeekRef(d => addWeeks(d,-1))}>‹ Prev</button>
           <span className="week-nav-label">📅 {weekLabel}</span>
@@ -105,7 +111,6 @@ export default function MySchedule() {
           <button className="btn btn-secondary btn-sm" onClick={() => setWeekRef(new Date())}>This Week</button>
         </div>
 
-        {/* Week Grid */}
         <div className="card" style={{ marginBottom:20 }}>
           <div className="card-header">
             <h2>📋 Weekly Schedule</h2>
@@ -137,9 +142,7 @@ export default function MySchedule() {
                               {shift.Start_Time}<br />– {shift.End_Time}
                             </div>
                           )}
-                          {shift.Room_ID && (
-                            <div style={{ fontSize:'0.68rem', color:'var(--c-text-3)', marginTop:2 }}>🏠 {shift.Room_ID}</div>
-                          )}
+                          {shift.Room_ID && <div style={{ fontSize:'0.68rem', color:'var(--c-text-3)', marginTop:2 }}>🏠 {shift.Room_ID}</div>}
                         </>
                       ) : (
                         <div style={{ fontSize:'0.75rem', color:'var(--c-text-3)', textAlign:'center', margin:'auto' }}>
@@ -154,7 +157,6 @@ export default function MySchedule() {
           </div>
         </div>
 
-        {/* Full Table View */}
         <div className="card">
           <div className="card-header"><h2>📋 Schedule Details</h2></div>
           <div className="table-wrap">

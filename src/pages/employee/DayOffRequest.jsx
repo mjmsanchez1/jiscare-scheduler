@@ -1,30 +1,52 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import Topbar from '../../components/shared/Topbar'
-import { MOCK_EMPLOYEES } from '../../utils/mockData'
+import { refreshEmployees, loadDayOffRequests, saveDayOffRequest } from '../../utils/mockData'
 import { n8nPost, API } from '../../utils/api'
 import { useToast } from '../../hooks/useToast'
 import ToastContainer from '../../components/ui/Toast'
 
-const MY_REQUESTS = [
-  { Date: '2026-03-10', Status: 'Approved', Reason: 'Family event',    Manager_Note: 'Approved — no conflicts found.' },
-  { Date: '2026-02-15', Status: 'Rejected', Reason: 'Personal errand', Manager_Note: 'Rejected — consecutive days off rule.' },
-]
-
 export default function EmployeeDayOff() {
   const { user } = useAuth()
   const { toasts, toast } = useToast()
-  const empData = MOCK_EMPLOYEES.find(e => e.Employee_ID === user?.id) || MOCK_EMPLOYEES[0]
 
-  const [form, setForm] = useState({ request_date:'', reason:'', notes:'' })
-  const [result, setResult] = useState(null)
+  const employees = refreshEmployees()
+  const empData   = employees.find(e => e.Employee_ID === user?.id) || employees[0]
+
+  const [form, setForm]       = useState({ request_date:'', reason:'', notes:'' })
+  const [result, setResult]   = useState(null)
   const [loading, setLoading] = useState(false)
-  const [requests, setRequests] = useState(MY_REQUESTS)
+
+  const loadMyRequests = () =>
+    loadDayOffRequests().filter(r => r.Employee_ID === empData?.Employee_ID)
+
+  const [requests, setRequests] = useState(loadMyRequests)
+
+  // Refresh when window regains focus so admin status changes appear
+  useEffect(() => {
+    const onFocus = () => setRequests(loadMyRequests())
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [empData?.Employee_ID])
 
   const handleSubmit = async () => {
-    if (!form.request_date || !form.reason) return toast.error('Missing Fields', 'Fill in date and reason.')
+    if (!form.request_date || !form.reason)
+      return toast.error('Missing Fields', 'Fill in date and reason.')
     setLoading(true)
     setResult(null)
+
+    const newRequest = {
+      id:            `DO-${Date.now()}`,
+      Employee_ID:   empData.Employee_ID,
+      Employee_Name: empData.Name,
+      Date:          form.request_date,
+      Status:        'Pending',
+      Reason:        form.reason,
+      Notes:         form.notes,
+      Requested_On:  new Date().toISOString().split('T')[0],
+      Manager_Note:  '',
+    }
+
     try {
       const res = await n8nPost(API.DAYOFF_SUBMIT, {
         employee_id:   empData.Employee_ID,
@@ -34,19 +56,26 @@ export default function EmployeeDayOff() {
         notes:         form.notes,
       })
       setResult(res)
+      newRequest.Status       = res.success ? 'Approved' : 'Rejected'
+      newRequest.Manager_Note = res.message || ''
+      saveDayOffRequest(newRequest)
+      setRequests(loadMyRequests())
       if (res.success) {
         toast.success('Request Approved!', res.message)
-        setRequests(prev => [{ Date: form.request_date, Status: 'Approved', Reason: form.reason, Manager_Note: res.data?.ai_reasoning || '' }, ...prev])
         setForm({ request_date:'', reason:'', notes:'' })
       } else {
         toast.error('Request Rejected', res.message)
       }
     } catch {
-      // Fallback message when n8n is offline
+      // n8n offline — save as Pending so admin sees it
+      saveDayOffRequest(newRequest)
+      setRequests(loadMyRequests())
       setResult({
-        success: false, status: 'error',
-        message: 'Could not connect to the validation server. Your request has been saved for review by the admin.',
+        success: false, status: 'pending',
+        message: 'Could not reach the AI validator. Your request has been saved as Pending and will be reviewed by the admin.',
       })
+      toast.info('Saved as Pending', 'Your request is saved and visible to the admin.')
+      setForm({ request_date:'', reason:'', notes:'' })
     } finally { setLoading(false) }
   }
 
@@ -62,21 +91,21 @@ export default function EmployeeDayOff() {
         </div>
 
         <div style={{display:'grid',gridTemplateColumns:'420px 1fr',gap:20,alignItems:'start'}}>
-          {/* Form */}
           <div className="card">
             <div className="card-header"><h2>📝 New Request</h2></div>
             <div className="card-body">
               <div style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',background:'var(--c-teal-pale)',borderRadius:'var(--radius-sm)',marginBottom:18}}>
                 <span style={{fontSize:'1.5rem'}}>👤</span>
                 <div>
-                  <div style={{fontWeight:700,fontSize:'0.9rem'}}>{empData.Name}</div>
-                  <div style={{fontSize:'0.75rem',color:'var(--c-text-2)'}}>{empData.Employee_ID} · {empData.Department}</div>
+                  <div style={{fontWeight:700,fontSize:'0.9rem'}}>{empData?.Name}</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--c-text-2)'}}>{empData?.Employee_ID} · {empData?.Department}</div>
                 </div>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Requested Date *</label>
-                <input type="date" className="form-input" value={form.request_date} onChange={e=>setForm(f=>({...f,request_date:e.target.value}))}
+                <input type="date" className="form-input" value={form.request_date}
+                  onChange={e=>setForm(f=>({...f,request_date:e.target.value}))}
                   min={new Date().toISOString().split('T')[0]} />
               </div>
 
@@ -84,13 +113,16 @@ export default function EmployeeDayOff() {
                 <label className="form-label">Reason *</label>
                 <select className="form-select" value={form.reason} onChange={e=>setForm(f=>({...f,reason:e.target.value}))}>
                   <option value="">— Select Reason —</option>
-                  {['Medical appointment','Family event','Personal errand','Rest & recovery','Emergency','Other'].map(r => <option key={r} value={r}>{r}</option>)}
+                  {['Medical appointment','Family event','Personal errand','Rest & recovery','Emergency','Other'].map(r =>
+                    <option key={r} value={r}>{r}</option>
+                  )}
                 </select>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Additional Notes</label>
-                <textarea className="form-textarea" rows={3} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Any additional context..." />
+                <textarea className="form-textarea" rows={3} value={form.notes}
+                  onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Any additional context..." />
               </div>
 
               <div className="alert alert-info" style={{marginBottom:16}}>
@@ -102,10 +134,10 @@ export default function EmployeeDayOff() {
               </button>
 
               {result && (
-                <div className={`ai-panel ${result.success ? 'clear' : result.status === 'error' ? 'pending' : 'conflict'}`} style={{marginTop:16}}>
+                <div className={`ai-panel ${result.success ? 'clear' : result.status === 'pending' ? 'pending' : 'conflict'}`} style={{marginTop:16}}>
                   <div className="ai-panel-header">
-                    <span className="ai-panel-icon">{result.success ? '✅' : result.status === 'error' ? '⚙️' : '❌'}</span>
-                    <span className="ai-panel-title">{result.success ? 'Approved!' : result.status === 'error' ? 'Connection Error' : 'Not Approved'}</span>
+                    <span className="ai-panel-icon">{result.success ? '✅' : result.status === 'pending' ? '⏳' : '❌'}</span>
+                    <span className="ai-panel-title">{result.success ? 'Approved!' : result.status === 'pending' ? 'Pending Review' : 'Not Approved'}</span>
                   </div>
                   <p className="ai-panel-message">{result.message}</p>
                   {result.data?.conflicts?.length > 0 && (
@@ -130,25 +162,28 @@ export default function EmployeeDayOff() {
             </div>
           </div>
 
-          {/* My Requests History */}
           <div className="card">
-            <div className="card-header"><h2>📋 My Request History</h2></div>
+            <div className="card-header">
+              <h2>📋 My Request History</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setRequests(loadMyRequests())} title="Refresh to see latest admin updates">🔄 Refresh</button>
+            </div>
             {requests.length === 0 ? (
               <div className="empty-state"><h3>No requests yet</h3><p>Submit your first day-off request!</p></div>
             ) : (
               <div className="table-wrap">
                 <table>
-                  <thead>
-                    <tr><th>Date</th><th>Reason</th><th>Status</th><th>Manager Note</th></tr>
-                  </thead>
+                  <thead><tr><th>Date</th><th>Reason</th><th>Status</th><th>Manager Note</th><th>Submitted</th></tr></thead>
                   <tbody>
-                    {requests.map((r,i) => (
-                      <tr key={i}>
-                        <td style={{fontFamily:'var(--font-mono)',fontSize:'0.85rem'}}>{r.Date}</td>
-                        <td style={{fontSize:'0.85rem'}}>{r.Reason}</td>
-                        <td><span className={`badge badge-${r.Status.toLowerCase()}`}>{r.Status}</span></td>
-                        <td style={{fontSize:'0.78rem',color:'var(--c-text-2)',maxWidth:250}}>{r.Manager_Note || '—'}</td>
-                      </tr>
+                    {[...requests]
+                      .sort((a,b) => (b.Requested_On || '').localeCompare(a.Requested_On || ''))
+                      .map((r,i) => (
+                        <tr key={i}>
+                          <td style={{fontFamily:'var(--font-mono)',fontSize:'0.85rem'}}>{r.Date}</td>
+                          <td style={{fontSize:'0.85rem'}}>{r.Reason}</td>
+                          <td><span className={`badge badge-${r.Status?.toLowerCase()}`}>{r.Status}</span></td>
+                          <td style={{fontSize:'0.78rem',color:'var(--c-text-2)',maxWidth:250}}>{r.Manager_Note || '—'}</td>
+                          <td style={{fontSize:'0.72rem',color:'var(--c-text-3)'}}>{r.Requested_On || '—'}</td>
+                        </tr>
                     ))}
                   </tbody>
                 </table>

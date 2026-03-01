@@ -12,6 +12,7 @@ import {
   loadAuthDB,
 } from '../../utils/mockData'
 import { getWeekDates, toISODate, getWeekLabel, isToday, addWeeks, shiftBadgeClass, DAYS_SHORT, getInitials } from '../../utils/dateUtils'
+import { UserAvatar } from '../../components/shared/Sidebar'
 import { n8nPost, API } from '../../utils/api'
 import { useToast } from '../../hooks/useToast'
 import ToastContainer from '../../components/ui/Toast'
@@ -733,7 +734,7 @@ export default function EmployeesPage() {
                   style={{ cursor: 'pointer' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-                    <div className="emp-avatar" style={{ margin: 0 }}>{getInitials(emp.Name)}</div>
+                    <UserAvatar userId={emp.Employee_ID} name={emp.Name} size={36} fontSize="0.85rem" borderRadius={10} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="emp-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.Name}</div>
                       <div className="emp-id">{emp.Employee_ID}</div>
@@ -802,7 +803,7 @@ export default function EmployeesPage() {
               {/* Employee info card */}
               <div className="card" style={{ marginBottom: 16 }}>
                 <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                  <div className="emp-avatar" style={{ width: 56, height: 56, fontSize: '1.2rem', borderRadius: 16 }}>{getInitials(selectedEmp.Name)}</div>
+                  <UserAvatar userId={selectedEmp.Employee_ID} name={selectedEmp.Name} size={56} fontSize="1.2rem" borderRadius={16} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{selectedEmp.Name}</div>
                     <div style={{ fontSize: '0.82rem', color: 'var(--c-text-2)' }}>{selectedEmp.Position} · {selectedEmp.Department}</div>

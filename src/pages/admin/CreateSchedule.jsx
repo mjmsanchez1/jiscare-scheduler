@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import Topbar from '../../components/shared/Topbar'
-import { MOCK_EMPLOYEES, MOCK_ROOMS, MOCK_SHIFTS, addMockShift } from '../../utils/mockData'
+import { refreshEmployees, MOCK_ROOMS, loadShifts, saveShift, addMockShift } from '../../utils/mockData'
 import {
   getWeekDates, toISODate, getWeekLabel, isToday,
   addWeeks, shiftBadgeClass, shiftChipClass, DAYS_SHORT, getInitials
@@ -21,7 +21,8 @@ export default function CreateSchedule() {
   const [weekRef, setWeekRef] = useState(new Date())
   const [weekDates, setWeekDates] = useState([])
   const [selectedEmp, setSelectedEmp] = useState(null)
-  const [shifts, setShifts] = useState([...MOCK_SHIFTS])
+  const [shifts, setShifts] = useState(() => loadShifts())
+  const MOCK_EMPLOYEES = refreshEmployees()
   const [checkResult, setCheckResult] = useState(null)
   const [checking, setChecking] = useState(false)
   const [saving, setSaving] = useState(false)
