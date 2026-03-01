@@ -3,10 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-"scripts": {
-  "build": "npx vite build",
-  "dev": "npx vite"
-}npm install -g vite,
+  "scripts": {
+    "build": "npx vite build",
+    "dev": "npx vite"
+  },
   "dependencies": {
     "date-fns": "^3.3.1",
     "jspdf": "^4.2.0",
