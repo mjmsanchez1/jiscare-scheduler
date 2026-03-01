@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext'
 export default function Login() {
   const { user, login } = useAuth()
   const navigate = useNavigate()
-  const [role, setRole] = useState('admin')
   const [empId, setEmpId] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -20,7 +19,7 @@ export default function Login() {
     setError('')
     setLoading(true)
     await new Promise(r => setTimeout(r, 600))
-    const result = login(empId.trim().toUpperCase(), password, role)
+    const result = login(empId.trim(), password)
     setLoading(false)
     if (result.success) {
       navigate(result.user.role === 'admin' ? '/admin/dashboard' : '/employee/my-schedule')
@@ -57,15 +56,25 @@ export default function Login() {
       <div className="login-right">
         <div className="login-form-wrap animate-fade-up">
           <h2>Welcome back</h2>
-          <p>Sign in to access your scheduling portal</p>
+          <p>Enter your credentials to access your portal</p>
 
-          <div className="login-role-tabs">
-            <button className={`login-role-tab ${role==='admin' ? 'active':''}`} onClick={() => { setRole('admin'); setEmpId(''); setPassword('') }}>
-              🔐 Admin
-            </button>
-            <button className={`login-role-tab ${role==='employee' ? 'active':''}`} onClick={() => { setRole('employee'); setEmpId(''); setPassword('') }}>
-              👤 Employee
-            </button>
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(0,168,150,0.08), rgba(0,168,150,0.03))',
+            border: '1px solid rgba(0,168,150,0.2)',
+            borderRadius: 'var(--radius)',
+            padding: '14px 16px',
+            marginBottom: 24,
+            fontSize: '0.82rem',
+            color: 'var(--c-text-2)',
+            display: 'flex',
+            gap: 10,
+            alignItems: 'flex-start'
+          }}>
+            <span style={{fontSize:'1.1rem', marginTop:1}}>💡</span>
+            <div>
+              <strong style={{color:'var(--c-text-1)'}}>Smart Login</strong> — your role is detected automatically from your credentials.
+              No need to select Admin or Employee.
+            </div>
           </div>
 
           <form onSubmit={handleSubmit}>
@@ -73,10 +82,11 @@ export default function Login() {
               <label className="form-label">Employee ID</label>
               <input
                 className="form-input"
-                placeholder={role === 'admin' ? 'e.g. ADMIN-001' : 'e.g. EMP-001'}
+                placeholder="e.g. ADMIN-001 or EMP-001"
                 value={empId}
                 onChange={e => setEmpId(e.target.value)}
                 required
+                autoFocus
               />
             </div>
             <div className="form-group">

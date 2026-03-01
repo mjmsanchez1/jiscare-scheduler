@@ -1,36 +1,75 @@
 import { createContext, useContext, useState } from 'react'
+import { loadAuthDB, MOCK_EMPLOYEES, refreshEmployees } from '../utils/mockData'
 
 const AuthContext = createContext(null)
 
-// Mock employee database — replace with real API
-const MOCK_EMPLOYEES = [
-  { id: 'EMP-001', name: 'Maria Santos',    role: 'employee', dept: 'Nursing',   position: 'Senior Nurse',     email: 'maria@jiscare.com',   password: 'emp001' },
-  { id: 'EMP-002', name: 'Juan dela Cruz',  role: 'employee', dept: 'Therapy',   position: 'Physiotherapist',  email: 'juan@jiscare.com',    password: 'emp002' },
-  { id: 'EMP-003', name: 'Ana Reyes',       role: 'employee', dept: 'Nursing',   position: 'Staff Nurse',      email: 'ana@jiscare.com',     password: 'emp003' },
-  { id: 'EMP-004', name: 'Carlos Mendoza',  role: 'employee', dept: 'Admin',     position: 'Care Coordinator', email: 'carlos@jiscare.com',  password: 'emp004' },
-  { id: 'EMP-005', name: 'Rosa Bautista',   role: 'employee', dept: 'Therapy',   position: 'Occupational Therapist', email: 'rosa@jiscare.com', password: 'emp005' },
-  { id: 'ADMIN-001', name: 'Admin User',    role: 'admin',    dept: 'Management',position: 'Scheduler Admin',  email: 'admin@jiscare.com',   password: 'admin123' },
-]
+// Admin is hard-coded (not in the employee DB)
+const ADMIN_PROFILE = {
+  id: 'ADMIN-001',
+  name: 'Admin User',
+  role: 'admin',
+  dept: 'Management',
+  position: 'Scheduler Admin',
+  email: 'admin@jiscare.com',
+}
+
+function buildUserSession(authEntry) {
+  if (authEntry.role === 'admin') return ADMIN_PROFILE
+
+  // Pull the latest profile from the employee DB
+  const employees = refreshEmployees()
+  const profile   = employees.find(e => e.Employee_ID === authEntry.id)
+  if (!profile) return null
+
+  return {
+    id:       profile.Employee_ID,
+    name:     profile.Name,
+    role:     'employee',
+    dept:     profile.Department,
+    position: profile.Position,
+    email:    profile.Email,
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('jiscare_user')
-    return saved ? JSON.parse(saved) : null
+    try {
+      const saved = localStorage.getItem('jiscare_user')
+      if (!saved) return null
+      const parsed = JSON.parse(saved)
+
+      // Re-hydrate the session from the live DB so name/position are always fresh
+      const authDB  = loadAuthDB()
+      const authEntry = authDB.find(u => u.id === parsed.id)
+      if (!authEntry) return null
+
+      const fresh = buildUserSession(authEntry)
+      if (!fresh) return null
+
+      // Persist fresh copy back (handles edits made while logged out)
+      localStorage.setItem('jiscare_user', JSON.stringify(fresh))
+      return fresh
+    } catch {
+      return null
+    }
   })
 
-  const login = (employeeId, password, role) => {
-    const found = MOCK_EMPLOYEES.find(e =>
-      e.id === employeeId &&
-      e.password === password &&
-      (role === 'admin' ? e.role === 'admin' : e.role === 'employee')
-    )
-    if (found) {
-      const { password: _, ...safe } = found
-      setUser(safe)
-      localStorage.setItem('jiscare_user', JSON.stringify(safe))
-      return { success: true, user: safe }
+  const login = (employeeId, password) => {
+    const authDB    = loadAuthDB()
+    const authEntry = authDB.find(u => u.id === employeeId && u.password === password)
+
+    if (!authEntry) {
+      return { success: false, error: 'Invalid Employee ID or Password' }
     }
-    return { success: false, error: 'Invalid credentials' }
+
+    const session = buildUserSession(authEntry)
+    if (!session) {
+      return { success: false, error: 'Employee profile not found in database' }
+    }
+
+    setUser(session)
+    localStorage.setItem('jiscare_user', JSON.stringify(session))
+    return { success: true, user: session }
   }
 
   const logout = () => {
@@ -38,11 +77,28 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('jiscare_user')
   }
 
+  // Call this after editing an employee's profile so the sidebar / greeting refreshes
+  const refreshSession = () => {
+    if (!user) return
+    const authDB    = loadAuthDB()
+    const authEntry = authDB.find(u => u.id === user.id)
+    if (!authEntry) return
+    const fresh = buildUserSession(authEntry)
+    if (fresh) {
+      setUser(fresh)
+      localStorage.setItem('jiscare_user', JSON.stringify(fresh))
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, MOCK_EMPLOYEES }}>
+    <AuthContext.Provider value={{ user, login, logout, refreshSession }}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-export const useAuth = () => useContext(AuthContext)
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used inside AuthProvider')
+  return context
+}

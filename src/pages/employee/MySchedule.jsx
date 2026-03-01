@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import Topbar from '../../components/shared/Topbar'
-import { MOCK_SHIFTS, MOCK_EMPLOYEES } from '../../utils/mockData'
+import { MOCK_SHIFTS, refreshEmployees } from '../../utils/mockData'
 import {
   getWeekDates, toISODate, getWeekLabel, isToday,
   addWeeks, shiftBadgeClass, DAYS_SHORT, DAYS, formatDate
@@ -13,16 +13,23 @@ import ToastContainer from '../../components/ui/Toast'
 export default function MySchedule() {
   const { user } = useAuth()
   const { toasts, toast } = useToast()
-  const [weekRef, setWeekRef] = useState(new Date())
+  const [weekRef, setWeekRef]   = useState(new Date())
   const [weekDates, setWeekDates] = useState([])
 
   useEffect(() => { setWeekDates(getWeekDates(weekRef)) }, [weekRef])
 
   const weekLabel = getWeekLabel(weekDates)
-  const empId = user?.id // mapped from auth
 
-  // Map auth user ID to Employee_ID format
-  const empData = MOCK_EMPLOYEES.find(e => e.Employee_ID === empId) || MOCK_EMPLOYEES[0]
+  // Always pull the freshest profile from localStorage DB
+  // user.id is the Employee_ID (e.g. 'EMP-002') set by AuthContext at login
+  const employees = refreshEmployees()
+  const empData   = employees.find(e => e.Employee_ID === user?.id) || {
+    Employee_ID: user?.id || '—',
+    Name:        user?.name     || 'Unknown Employee',
+    Department:  user?.dept     || '—',
+    Position:    user?.position || '—',
+    Email:       user?.email    || '—',
+  }
 
   const getShift = (date) => {
     const iso = toISODate(date)
@@ -44,10 +51,6 @@ export default function MySchedule() {
     }
   }
 
-  const upcomingShifts = weekDates
-    .map(d => ({ date: d, shift: getShift(d) }))
-    .filter(x => x.shift && !isToday(x.date) && new Date(x.date) > new Date())
-
   const todayShift = weekDates.map(d => getShift(d)).find((s, i) => isToday(weekDates[i]))
 
   return (
@@ -56,9 +59,10 @@ export default function MySchedule() {
       <ToastContainer toasts={toasts} />
 
       <div className="page-content animate-fade-up">
-        <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+        <div className="page-header" style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexWrap:'wrap', gap:12 }}>
           <div>
             <h1>📅 My Schedule</h1>
+            {/* This line now shows the real name/position/department from the DB */}
             <p>Hello, <strong>{empData.Name}</strong> — {empData.Position} · {empData.Department}</p>
           </div>
           <button className="btn btn-primary" onClick={handlePDFExport}>
@@ -70,30 +74,25 @@ export default function MySchedule() {
         {todayShift && (
           <div style={{
             background: 'linear-gradient(135deg, var(--c-teal), var(--c-teal-dark))',
-            borderRadius: 'var(--radius-lg)',
-            padding: '24px 28px',
-            color: '#fff',
-            marginBottom: 24,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 20,
+            borderRadius: 'var(--radius-lg)', padding: '24px 28px', color: '#fff',
+            marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20,
             boxShadow: 'var(--shadow-lg)',
           }} className="animate-fade-up">
-            <div style={{fontSize:'2.5rem'}}>
+            <div style={{ fontSize:'2.5rem' }}>
               {todayShift.Shift_Type === 'Morning' ? '🌅' : todayShift.Shift_Type === 'Afternoon' ? '🌤' : todayShift.Shift_Type === 'Night' ? '🌙' : '😴'}
             </div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:'0.75rem',opacity:0.7,textTransform:'uppercase',letterSpacing:'0.1em',fontWeight:700}}>Today's Shift</div>
-              <div style={{fontSize:'1.5rem',fontWeight:800,lineHeight:1.2}}>{todayShift.Shift_Type} Shift</div>
-              <div style={{opacity:0.85,marginTop:4,fontSize:'0.9rem'}}>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:'0.75rem', opacity:0.7, textTransform:'uppercase', letterSpacing:'0.1em', fontWeight:700 }}>Today's Shift</div>
+              <div style={{ fontSize:'1.5rem', fontWeight:800, lineHeight:1.2 }}>{todayShift.Shift_Type} Shift</div>
+              <div style={{ opacity:0.85, marginTop:4, fontSize:'0.9rem' }}>
                 {todayShift.Start_Time && todayShift.End_Time
                   ? `${todayShift.Start_Time} – ${todayShift.End_Time}  ·  ${todayShift.Room_ID || 'No room'}`
                   : 'Rest Day — Enjoy your day off! 🌿'}
               </div>
             </div>
-            <div style={{textAlign:'right'}}>
-              <div style={{fontSize:'0.78rem',opacity:0.7}}>{formatDate(new Date(),{weekday:'long'})}</div>
-              <div style={{fontSize:'1.1rem',fontWeight:700}}>{formatDate(new Date(),{month:'long',day:'numeric'})}</div>
+            <div style={{ textAlign:'right' }}>
+              <div style={{ fontSize:'0.78rem', opacity:0.7 }}>{formatDate(new Date(), { weekday:'long' })}</div>
+              <div style={{ fontSize:'1.1rem', fontWeight:700 }}>{formatDate(new Date(), { month:'long', day:'numeric' })}</div>
             </div>
           </div>
         )}
@@ -107,10 +106,10 @@ export default function MySchedule() {
         </div>
 
         {/* Week Grid */}
-        <div className="card" style={{marginBottom:20}}>
+        <div className="card" style={{ marginBottom:20 }}>
           <div className="card-header">
             <h2>📋 Weekly Schedule</h2>
-            <span style={{fontSize:'0.78rem',color:'var(--c-text-3)'}}>{weekLabel}</span>
+            <span style={{ fontSize:'0.78rem', color:'var(--c-text-3)' }}>{weekLabel}</span>
           </div>
           <div className="card-body">
             <div className="week-grid">
@@ -126,26 +125,26 @@ export default function MySchedule() {
                     <div style={{
                       minHeight: 90,
                       border: `1.5px solid ${today ? 'var(--c-teal)' : 'var(--c-border)'}`,
-                      borderRadius: 'var(--radius-sm)',
-                      padding: 10,
+                      borderRadius: 'var(--radius-sm)', padding: 10,
                       background: today ? 'var(--c-teal-pale)' : 'var(--c-surface)',
-                      display: 'flex', flexDirection: 'column', gap: 4,
-                      transition: 'all 0.2s',
+                      display: 'flex', flexDirection: 'column', gap: 4, transition: 'all 0.2s',
                     }}>
                       {shift ? (
                         <>
-                          <span className={`badge ${shiftBadgeClass(shift.Shift_Type)}`} style={{alignSelf:'flex-start'}}>{shift.Shift_Type}</span>
+                          <span className={`badge ${shiftBadgeClass(shift.Shift_Type)}`} style={{ alignSelf:'flex-start' }}>{shift.Shift_Type}</span>
                           {shift.Start_Time && shift.End_Time && (
-                            <div style={{fontSize:'0.72rem',fontFamily:'var(--font-mono)',color:'var(--c-text-2)',marginTop:4}}>
+                            <div style={{ fontSize:'0.72rem', fontFamily:'var(--font-mono)', color:'var(--c-text-2)', marginTop:4 }}>
                               {shift.Start_Time}<br />– {shift.End_Time}
                             </div>
                           )}
                           {shift.Room_ID && (
-                            <div style={{fontSize:'0.68rem',color:'var(--c-text-3)',marginTop:2}}>🏠 {shift.Room_ID}</div>
+                            <div style={{ fontSize:'0.68rem', color:'var(--c-text-3)', marginTop:2 }}>🏠 {shift.Room_ID}</div>
                           )}
                         </>
                       ) : (
-                        <div style={{fontSize:'0.75rem',color:'var(--c-text-3)',textAlign:'center',margin:'auto'}}>—<br /><span style={{fontSize:'0.65rem'}}>Not scheduled</span></div>
+                        <div style={{ fontSize:'0.75rem', color:'var(--c-text-3)', textAlign:'center', margin:'auto' }}>
+                          —<br /><span style={{ fontSize:'0.65rem' }}>Not scheduled</span>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -165,17 +164,20 @@ export default function MySchedule() {
               </thead>
               <tbody>
                 {weekDates.map((d, i) => {
-                  const s = getShift(d)
+                  const s     = getShift(d)
                   const today = isToday(d)
                   return (
-                    <tr key={i} style={today ? {background:'var(--c-teal-pale)',fontWeight:600}:{}}>
-                      <td>{DAYS[d.getDay()]}{today && <span style={{marginLeft:6,background:'var(--c-teal)',color:'#fff',fontSize:'0.62rem',padding:'2px 7px',borderRadius:20,fontWeight:700}}>TODAY</span>}</td>
-                      <td style={{fontFamily:'var(--font-mono)',fontSize:'0.85rem'}}>{d.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'})}</td>
-                      <td>{s ? <span className={`badge ${shiftBadgeClass(s.Shift_Type)}`}>{s.Shift_Type}</span> : <span style={{color:'var(--c-text-3)'}}>—</span>}</td>
-                      <td style={{fontFamily:'var(--font-mono)',fontSize:'0.82rem'}}>{s?.Start_Time||'—'}</td>
-                      <td style={{fontFamily:'var(--font-mono)',fontSize:'0.82rem'}}>{s?.End_Time||'—'}</td>
-                      <td style={{fontSize:'0.82rem'}}>{s?.Room_ID||'—'}</td>
-                      <td style={{fontSize:'0.78rem',color:'var(--c-text-2)'}}>{s?.Notes||''}</td>
+                    <tr key={i} style={today ? { background:'var(--c-teal-pale)', fontWeight:600 } : {}}>
+                      <td>
+                        {DAYS[d.getDay()]}
+                        {today && <span style={{ marginLeft:6, background:'var(--c-teal)', color:'#fff', fontSize:'0.62rem', padding:'2px 7px', borderRadius:20, fontWeight:700 }}>TODAY</span>}
+                      </td>
+                      <td style={{ fontFamily:'var(--font-mono)', fontSize:'0.85rem' }}>{d.toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' })}</td>
+                      <td>{s ? <span className={`badge ${shiftBadgeClass(s.Shift_Type)}`}>{s.Shift_Type}</span> : <span style={{ color:'var(--c-text-3)' }}>—</span>}</td>
+                      <td style={{ fontFamily:'var(--font-mono)', fontSize:'0.82rem' }}>{s?.Start_Time || '—'}</td>
+                      <td style={{ fontFamily:'var(--font-mono)', fontSize:'0.82rem' }}>{s?.End_Time   || '—'}</td>
+                      <td style={{ fontSize:'0.82rem' }}>{s?.Room_ID || '—'}</td>
+                      <td style={{ fontSize:'0.78rem', color:'var(--c-text-2)' }}>{s?.Notes || ''}</td>
                     </tr>
                   )
                 })}
