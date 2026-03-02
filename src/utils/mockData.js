@@ -1,14 +1,26 @@
 // ============================================================
-// JISCare — Shared Data Store
-// ALL data is persisted to localStorage so admin changes are
-// immediately visible to employee pages in the same browser.
+// JISCare — Data Store
+//
+// ARCHITECTURE:
+//   Google Sheets (via n8n) = source of truth (cross-device)
+//   localStorage            = offline cache only
+//
+// All mutations call n8n to write to Google Sheets.
+// On startup, the app loads fresh data from Google Sheets
+// and updates the local cache.
 // ============================================================
 
-const STORAGE_KEY_EMPLOYEES = 'jiscare_employees_db'
-const STORAGE_KEY_AUTH      = 'jiscare_auth_db'
-const STORAGE_KEY_SHIFTS    = 'jiscare_shifts_db'
-const STORAGE_KEY_DAYOFF    = 'jiscare_dayoff_db'
+import { API, n8nPost } from './api'
 
+// ── Storage Keys ─────────────────────────────────────────────
+const KEYS = {
+  EMPLOYEES: 'jiscare_employees_db',
+  AUTH:      'jiscare_auth_db',
+  SHIFTS:    'jiscare_shifts_db',
+  DAYOFF:    'jiscare_dayoff_db',
+}
+
+// ── Seed Data (used only when both n8n AND cache are empty) ──
 const SEED_EMPLOYEES = [
   { Employee_ID: 'EMP-001', Name: 'Maria Santos',   Department: 'Nursing',  Position: 'Senior Nurse',           Email: 'maria@jiscare.com'  },
   { Employee_ID: 'EMP-002', Name: 'Juan dela Cruz', Department: 'Therapy',  Position: 'Physiotherapist',        Email: 'juan@jiscare.com'   },
@@ -30,37 +42,65 @@ const SEED_SHIFTS = [
   { Employee_ID: 'EMP-001', Date: '2026-02-24', Shift_Type: 'Morning',   Start_Time: '7:30 AM',  End_Time: '12:30 PM', Room_ID: 'ROOM-01', Notes: '' },
   { Employee_ID: 'EMP-002', Date: '2026-02-24', Shift_Type: 'Morning',   Start_Time: '7:30 AM',  End_Time: '12:30 PM', Room_ID: 'ROOM-02', Notes: '' },
   { Employee_ID: 'EMP-003', Date: '2026-02-24', Shift_Type: 'Afternoon', Start_Time: '12:30 PM', End_Time: '5:30 PM',  Room_ID: 'ROOM-01', Notes: '' },
-  { Employee_ID: 'EMP-001', Date: '2026-02-25', Shift_Type: 'Morning',   Start_Time: '7:30 AM',  End_Time: '12:30 PM', Room_ID: 'ROOM-01', Notes: '' },
-  { Employee_ID: 'EMP-002', Date: '2026-02-25', Shift_Type: 'Afternoon', Start_Time: '12:30 PM', End_Time: '5:30 PM',  Room_ID: 'ROOM-03', Notes: '' },
-  { Employee_ID: 'EMP-003', Date: '2026-02-25', Shift_Type: 'OFF',       Start_Time: '',         End_Time: '',         Room_ID: '',         Notes: 'Rest Day' },
-  { Employee_ID: 'EMP-004', Date: '2026-02-25', Shift_Type: 'Morning',   Start_Time: '7:30 AM',  End_Time: '12:30 PM', Room_ID: 'ROOM-04', Notes: '' },
-  { Employee_ID: 'EMP-005', Date: '2026-02-26', Shift_Type: 'Afternoon', Start_Time: '12:30 PM', End_Time: '5:30 PM',  Room_ID: 'ROOM-03', Notes: '' },
 ]
 
-const SEED_DAYOFF = [
-  { id: 'DO-001', Employee_ID: 'EMP-001', Employee_Name: 'Maria Santos',   Date: '2026-03-10', Status: 'Approved', Reason: 'Family event',    Requested_On: '2026-02-20', Manager_Note: 'Approved as no conflicts found.' },
-  { id: 'DO-002', Employee_ID: 'EMP-003', Employee_Name: 'Ana Reyes',      Date: '2026-03-12', Status: 'Rejected', Reason: 'Personal errand', Requested_On: '2026-02-21', Manager_Note: 'Rejected: shift conflict detected.' },
-  { id: 'DO-003', Employee_ID: 'EMP-002', Employee_Name: 'Juan dela Cruz', Date: '2026-03-15', Status: 'Pending',  Reason: 'Medical checkup', Requested_On: '2026-02-22', Manager_Note: '' },
-]
+const SEED_DAYOFF = []
 
-function loadFromStorage(key, seed) {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) return JSON.parse(raw)
-  } catch {}
-  localStorage.setItem(key, JSON.stringify(seed))
-  return [...seed]
+// ── localStorage helpers ──────────────────────────────────────
+function lsGet(key, fallback) {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback } catch { return fallback }
 }
-
-function saveToStorage(key, data) {
+function lsSet(key, data) {
   try { localStorage.setItem(key, JSON.stringify(data)) } catch {}
 }
 
-// ── Employee DB ───────────────────────────────────────────────
-export let MOCK_EMPLOYEES = loadFromStorage(STORAGE_KEY_EMPLOYEES, SEED_EMPLOYEES)
+// ── In-memory mirrors (kept in sync with cache + n8n) ────────
+export let MOCK_EMPLOYEES = lsGet(KEYS.EMPLOYEES, SEED_EMPLOYEES)
+export let MOCK_SHIFTS    = lsGet(KEYS.SHIFTS,    SEED_SHIFTS)
+export let MOCK_ROOMS = [
+  { Room_ID: 'ROOM-01', Room_Name: 'Room 101 — General',  Capacity: 4, Location: 'Ground Floor' },
+  { Room_ID: 'ROOM-02', Room_Name: 'Room 102 — ICU',      Capacity: 2, Location: 'Ground Floor' },
+  { Room_ID: 'ROOM-03', Room_Name: 'Room 201 — Therapy',  Capacity: 3, Location: 'Second Floor' },
+  { Room_ID: 'ROOM-04', Room_Name: 'Room 202 — Recovery', Capacity: 4, Location: 'Second Floor' },
+]
 
+// ── Bootstrap: load everything from Google Sheets via n8n ────
+// Call this once on app startup. Returns { employees, shifts, dayoffs }
+export async function bootstrapFromSheets() {
+  const results = { employees: null, shifts: null, dayoffs: null }
+
+  try {
+    const empRes = await n8nPost(API.GET_EMPLOYEES, {})
+    if (empRes?.data?.length) {
+      MOCK_EMPLOYEES = empRes.data
+      lsSet(KEYS.EMPLOYEES, MOCK_EMPLOYEES)
+      results.employees = MOCK_EMPLOYEES
+    }
+  } catch { /* n8n offline — use local cache */ }
+
+  try {
+    const shiftRes = await n8nPost(API.GET_SHIFTS, {})
+    if (shiftRes?.data?.length) {
+      MOCK_SHIFTS = shiftRes.data
+      lsSet(KEYS.SHIFTS, MOCK_SHIFTS)
+      results.shifts = MOCK_SHIFTS
+    }
+  } catch { /* offline */ }
+
+  try {
+    const dayoffRes = await n8nPost(API.GET_DAYOFFS, {})
+    if (dayoffRes?.data?.length) {
+      lsSet(KEYS.DAYOFF, dayoffRes.data)
+      results.dayoffs = dayoffRes.data
+    }
+  } catch { /* offline */ }
+
+  return results
+}
+
+// ── Employee functions ────────────────────────────────────────
 export function refreshEmployees() {
-  MOCK_EMPLOYEES = loadFromStorage(STORAGE_KEY_EMPLOYEES, SEED_EMPLOYEES)
+  MOCK_EMPLOYEES = lsGet(KEYS.EMPLOYEES, SEED_EMPLOYEES)
   return MOCK_EMPLOYEES
 }
 
@@ -74,79 +114,62 @@ export function getNextEmployeeId() {
 }
 
 export function addEmployee(emp) {
-  MOCK_EMPLOYEES = [...MOCK_EMPLOYEES, emp]
-  saveToStorage(STORAGE_KEY_EMPLOYEES, MOCK_EMPLOYEES)
+  MOCK_EMPLOYEES = [...MOCK_EMPLOYEES.filter(e => e.Employee_ID !== emp.Employee_ID), emp]
+  lsSet(KEYS.EMPLOYEES, MOCK_EMPLOYEES)
 }
 
 export function updateEmployee(id, updates) {
-  MOCK_EMPLOYEES = MOCK_EMPLOYEES.map(e =>
-    e.Employee_ID === id ? { ...e, ...updates } : e
-  )
-  saveToStorage(STORAGE_KEY_EMPLOYEES, MOCK_EMPLOYEES)
+  MOCK_EMPLOYEES = MOCK_EMPLOYEES.map(e => e.Employee_ID === id ? { ...e, ...updates } : e)
+  lsSet(KEYS.EMPLOYEES, MOCK_EMPLOYEES)
 }
 
 export function deleteEmployee(id) {
   MOCK_EMPLOYEES = MOCK_EMPLOYEES.filter(e => e.Employee_ID !== id)
-  saveToStorage(STORAGE_KEY_EMPLOYEES, MOCK_EMPLOYEES)
+  lsSet(KEYS.EMPLOYEES, MOCK_EMPLOYEES)
 }
 
-// ── Auth DB ───────────────────────────────────────────────────
+// ── Auth DB functions ─────────────────────────────────────────
 export function loadAuthDB() {
-  return loadFromStorage(STORAGE_KEY_AUTH, SEED_AUTH)
+  return lsGet(KEYS.AUTH, SEED_AUTH)
 }
 
 export function saveAuthEntry(entry) {
-  const db = loadAuthDB()
+  const db  = loadAuthDB()
   const idx = db.findIndex(u => u.id === entry.id)
   if (idx !== -1) db[idx] = { ...db[idx], ...entry }
   else db.push(entry)
-  saveToStorage(STORAGE_KEY_AUTH, db)
+  lsSet(KEYS.AUTH, db)
 }
 
 export function deleteAuthEntry(id) {
-  const db = loadAuthDB().filter(u => u.id !== id)
-  saveToStorage(STORAGE_KEY_AUTH, db)
+  lsSet(KEYS.AUTH, loadAuthDB().filter(u => u.id !== id))
 }
 
-// ── Rooms (static) ────────────────────────────────────────────
-export const MOCK_ROOMS = [
-  { Room_ID: 'ROOM-01', Room_Name: 'Room 101 — General',  Capacity: 4, Location: 'Ground Floor' },
-  { Room_ID: 'ROOM-02', Room_Name: 'Room 102 — ICU',      Capacity: 2, Location: 'Ground Floor' },
-  { Room_ID: 'ROOM-03', Room_Name: 'Room 201 — Therapy',  Capacity: 3, Location: 'Second Floor' },
-  { Room_ID: 'ROOM-04', Room_Name: 'Room 202 — Recovery', Capacity: 4, Location: 'Second Floor' },
-]
-
-// ── Shift DB — persisted ──────────────────────────────────────
+// ── Shift functions ───────────────────────────────────────────
 export function loadShifts() {
-  return loadFromStorage(STORAGE_KEY_SHIFTS, SEED_SHIFTS)
-}
-
-export let MOCK_SHIFTS = loadShifts()
-
-export function refreshShifts() {
-  MOCK_SHIFTS = loadShifts()
+  MOCK_SHIFTS = lsGet(KEYS.SHIFTS, SEED_SHIFTS)
   return MOCK_SHIFTS
 }
 
-// Upsert: replaces existing shift for same employee+date, or appends
+export function refreshShifts() {
+  return loadShifts()
+}
+
 export function saveShift(shift) {
   const all = loadShifts()
   const idx = all.findIndex(s => s.Employee_ID === shift.Employee_ID && s.Date === shift.Date)
   if (idx !== -1) all[idx] = shift
   else all.push(shift)
   MOCK_SHIFTS = all
-  saveToStorage(STORAGE_KEY_SHIFTS, all)
+  lsSet(KEYS.SHIFTS, all)
 }
 
-// Backward-compat alias — now also persists
-export function addMockShift(shift) {
-  saveShift(shift)
-}
+export function addMockShift(shift) { saveShift(shift) }
 
 export function deleteShift(employeeId, date) {
   const all = loadShifts().filter(s => !(s.Employee_ID === employeeId && s.Date === date))
   MOCK_SHIFTS = all
-  saveToStorage(STORAGE_KEY_SHIFTS, all)
+  lsSet(KEYS.SHIFTS, all)
 }
 
 export function getMockShiftsForEmployee(id) {
@@ -158,9 +181,9 @@ export function getMockShiftsForWeek(dates) {
   return loadShifts().filter(s => iso.has(s.Date))
 }
 
-// ── Day-Off Request DB — persisted ───────────────────────────
+// ── Day-Off functions ─────────────────────────────────────────
 export function loadDayOffRequests() {
-  return loadFromStorage(STORAGE_KEY_DAYOFF, SEED_DAYOFF)
+  return lsGet(KEYS.DAYOFF, SEED_DAYOFF)
 }
 
 export function saveDayOffRequest(request) {
@@ -168,7 +191,7 @@ export function saveDayOffRequest(request) {
   const idx = all.findIndex(r => r.id === request.id)
   if (idx !== -1) all[idx] = request
   else all.push(request)
-  saveToStorage(STORAGE_KEY_DAYOFF, all)
+  lsSet(KEYS.DAYOFF, all)
   return request
 }
 
@@ -181,6 +204,6 @@ export function updateDayOffStatus(id, status, managerNote = '') {
   const idx = all.findIndex(r => r.id === id)
   if (idx !== -1) {
     all[idx] = { ...all[idx], Status: status, Manager_Note: managerNote }
-    saveToStorage(STORAGE_KEY_DAYOFF, all)
+    lsSet(KEYS.DAYOFF, all)
   }
 }

@@ -1,37 +1,39 @@
 // ============================================================
 // JISCare — n8n Webhook Configuration
-// Replace these URLs with your actual n8n instance URLs
+// Set VITE_N8N_BASE_URL in your .env.local file:
+//   VITE_N8N_BASE_URL=https://your-n8n-instance.com/webhook
 // ============================================================
 
 const N8N_BASE = import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678/webhook'
 
 export const API = {
-  // Schedule Conflict Checker (Workflow 2)
-  SCHEDULE_CHECK: `${N8N_BASE}/schedule-check`,
+  // ── AI / Validation Workflows ────────────────────────────────
+  SCHEDULE_CHECK:   `${N8N_BASE}/schedule-check`,
+  DAYOFF_SUBMIT:    `${N8N_BASE}/dayoff-submit`,
 
-  // Day-Off Request Handler (Workflow 1)
-  DAYOFF_SUBMIT:  `${N8N_BASE}/dayoff-submit`,
+  // ── Data Sync Workflows (Workflow 3) ─────────────────────────
+  CREATE_SHIFT:     `${N8N_BASE}/create-shift`,
+  GET_SHIFTS:       `${N8N_BASE}/get-shifts`,
+  DELETE_SHIFT:     `${N8N_BASE}/delete-shift`,
 
-  // NEW WEBHOOKS — Add these to your n8n:
-  // Webhook path: "create-shift"
-  CREATE_SHIFT:   `${N8N_BASE}/create-shift`,
+  CREATE_EMPLOYEE:  `${N8N_BASE}/create-employee`,
+  GET_EMPLOYEES:    `${N8N_BASE}/get-employees`,
+  DELETE_EMPLOYEE:  `${N8N_BASE}/delete-employee`,
 
-  // Webhook path: "get-shifts"
-  GET_SHIFTS:     `${N8N_BASE}/get-shifts`,
+  GET_DAYOFFS:      `${N8N_BASE}/get-dayoffs`,
+  UPDATE_DAYOFF:    `${N8N_BASE}/update-dayoff`,
 
-  // Webhook path: "get-employees"
-  GET_EMPLOYEES:  `${N8N_BASE}/get-employees`,
+  GET_AUTH:         `${N8N_BASE}/get-auth`,
 
-  // Webhook path: "send-schedule-email"
-  SEND_EMAIL:     `${N8N_BASE}/send-schedule-email`,
+  // ── Email ────────────────────────────────────────────────────
+  SEND_EMAIL:       `${N8N_BASE}/send-schedule-email`,
 }
 
-// Helper: post JSON to n8n webhook
 export async function n8nPost(url, body) {
   const res = await fetch(url, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body:    JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: 'Network error' }))
